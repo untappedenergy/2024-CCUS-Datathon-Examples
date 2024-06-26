@@ -1,0 +1,128 @@
+---
+title: "CCS Project Data Visualizations"
+author: "Stephen Situ"
+date: "2024-06-19"
+output: html_document
+---
+### Install Packages
+```{r install, include=TRUE}
+if (!require(tidyverse)) install.packages("tidyverse", dependencies = TRUE)
+if (!require(ggplot2)) install.packages("ggplot2", dependencies = TRUE)
+if (!require(dplyr)) install.packages("dplyr", dependencies = TRUE)
+if (!require(tm)) install.packages("tm", dependencies = TRUE)
+if (!require(wordcloud)) install.packages("wordcloud", dependencies = TRUE)
+if (!require(treemapify)) install.packages("treemapify", dependencies = TRUE)
+if (!require(ggfittext)) install.packages("ggfittext", dependencies = TRUE)
+if (!require(magrittr)) install.packages("magrittr", dependencies = TRUE)
+```
+
+### Load Packages
+```{r setup, include=TRUE}
+# Load additional libraries explicitly
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(tm)
+library(wordcloud)
+library(treemapify)
+library(ggfittext)
+library(magrittr)
+```
+
+### Load Data
+```{r load, include=TRUE}
+### Load data into dplyr dataframe
+file_path <- "CCS Map Data Jan2023.csv"  # Update the path to your file
+ccs_data <- read_csv(file_path)
+```
+### Schema and Statistical Summary
+```{r explore, include=TRUE}
+# Schema of data
+str(ccs_data)
+# Statistical Summary of data
+summary(ccs_data)
+```
+### Treemap of Countries with projects
+```{r visual1, include=TRUE}
+# Count of projects by country
+project_count_by_country <- ccs_data %>%
+  group_by(`Country Location`) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  top_n(10, count)  # Show top 10 countries
+
+# Plot treemap with updated styling
+ggplot(project_count_by_country, aes(area = count, fill = count, label = paste(`Country Location`, count, sep = "\n"))) +
+  geom_treemap() +
+  geom_treemap_text(colour = "white", place = "centre", grow = TRUE, reflow = TRUE) +
+  scale_fill_gradient(low = "lightgreen", high = "darkgreen") +  # Use a gradient color scale
+  labs(title = "Top 10 Countries by Number of Carbon Capture Projects",
+       subtitle = "Reflective of the global distribution of CCS initiatives",
+       fill = "Number of Projects") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5, margin = margin(t = 10, b = 10)),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, margin = margin(t = 10, b = 10)),
+    legend.position = "right",
+    plot.margin = margin(20, 20, 20, 20),
+    panel.grid = element_blank()  # Remove grid for cleaner look
+  )
+
+```
+
+### Wordcloud of project summaries
+```{r visual2, include=TRUE}
+# Extract non-null and non-NA Project Summary values
+project_summaries <- ccs_data %>%
+  filter(!is.na(`Project Summary`) & `Project Summary` != "") %>%
+  pull(`Project Summary`)
+
+# Convert encoding to UTF-8
+project_summaries <- iconv(project_summaries, to = "UTF-8")
+
+# Create a function to remove special characters
+remove_special_chars <- content_transformer(function(x) gsub("[^[:alnum:][:space:]]*", "", x))
+
+# Create a corpus and clean the text
+corpus <- Corpus(VectorSource(project_summaries))
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, stripWhitespace)
+corpus <- tm_map(corpus, remove_special_chars)  # Remove special characters
+
+# Create a document-term matrix
+dtm <- TermDocumentMatrix(corpus)
+matrix <- as.matrix(dtm)
+word_freqs <- sort(rowSums(matrix), decreasing = TRUE)
+word_freqs_df <- data.frame(word = names(word_freqs), freq = word_freqs)
+
+# Custom color palette
+custom_colors <- c("#1f78b4", "#33a02c", "#a6cee3", "#b2df8a", "#6a3d9a", "#ff7f00", "#cab2d6", "#b15928")
+
+# Generate the word cloud
+wordcloud(words = word_freqs_df$word, freq = word_freqs_df$freq, min.freq = 2,
+          max.words = 100, random.order = FALSE, colors = custom_colors)
+
+```
+
+### Bar Chart of project types
+```{r visual3, include=TRUE}
+# Bar chart of project types excluding negligible ones
+project_types <- ccs_data %>%
+  filter(!is.na(`Project Type`)) %>%
+  count(`Project Type`) %>%
+  filter(n > 1)  # Exclude project types with only 1 occurrence
+
+# Generate a color palette based on the number of project types
+num_types <- nrow(project_types)
+color_palette <- colorRampPalette(c("#2E8B57", "#66CDAA", "#4682B4", "#B0E0E6", "#3CB371", "#20B2AA", "#5F9EA0"))(num_types)
+
+ggplot(project_types, aes(x = reorder(`Project Type`, -n), y = n, fill = `Project Type`)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Distribution of Project Types", x = "Project Type", y = "Number of Projects") +
+  theme_minimal() +
+  scale_fill_manual(values = color_palette) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8))
+```
